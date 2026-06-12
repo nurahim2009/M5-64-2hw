@@ -1,0 +1,22 @@
+# Виртуальное окружение
+venv/
+ENV/
+env/
+.env
+
+# Кэш Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# База данных (чтобы отправлять чистый проект)
+*.sqlite3
+
+# Файлы настроек VS Code и JetBrains (PyCharm)
+.vscode/
+.idea/
+
+# Скрытые файлы системы
+.DS_Store
+Thumbs.db
