@@ -1,39 +1,73 @@
 import random
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
-from rest_framework import status
+from rest_framework import status, generics, permissions
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet
+from rest_framework.decorators import action
 from rest_framework.authtoken.models import Token
-from .models import UserConfirm
-from .serializers import UserRegisterSerializer, UserConfirmSerializer, UserLoginSerializer
 
-class RegisterAPIView(APIView):
-    def post(self, request):
-        serializer = UserRegisterSerializer(data=request.data)
+from .models import Category, Product, Review, UserConfirm
+from .serializers import (
+    CategorySerializer, ProductSerializer, ReviewSerializer, 
+    ProductReviewsSerializer, UserRegisterSerializer, 
+    UserConfirmSerializer, UserLoginSerializer
+)
+
+# ==================== СУЩЕСТВУЮЩИЕ VIEWSETS (УЖЕ CBV) ====================
+
+class CategoryViewSet(ModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
+class ProductViewSet(ModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+
+    @action(detail=False, methods=['get'], url_path='reviews')
+    def products_with_reviews(self, request):
+        products = self.get_queryset()
+        serializer = ProductReviewsSerializer(products, many=True)
+        return Response(serializer.data)
+
+class ReviewViewSet(ModelViewSet):
+    queryset = Review.objects.all()
+    serializer_class = ReviewSerializer
+
+
+# ==================== НОВЫЕ ВЬЮШКИ ПОЛЬЗОВАТЕЛЕЙ НА CBV ====================
+
+class RegisterGenericAPIView(generics.GenericAPIView):
+    serializer_class = UserRegisterSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Создаем пользователя, но делаем его НЕАКТИВНЫМ
         user = User.objects.create_user(
             username=serializer.validated_data['username'],
             email=serializer.validated_data['email'],
             password=serializer.validated_data['password'],
-            is_active=False  # Комментарий из ТЗ выполнен
+            is_active=False  # Пользователь изначально неактивен
         )
         
-        # Генерируем 6-значный рандомный код
+        # Генерация 6-значного кода
         code = str(random.randint(100000, 999999))
         UserConfirm.objects.create(user=user, code=code)
         
-        # В реальном проекте тут была бы отправка на Email, но для ДЗ выведем код в ответе
         return Response(
-            {"message": "Пользователь успешно зарегистрирован! Подтвердите аккаунт.", "code": code},
-            status=status.HTTP_21__CREATED if hasattr(status, 'HTTP_21__CREATED') else status.HTTP_201_CREATED
+            {"message": "Пользователь зарегистрирован! Подтвердите аккаунт.", "code": code},
+            status=status.HTTP_201_CREATED
         )
 
-class ConfirmAPIView(APIView):
-    def post(self, request):
-        serializer = UserConfirmSerializer(data=request.data)
+
+class ConfirmGenericAPIView(generics.GenericAPIView):
+    serializer_class = UserConfirmSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         username = serializer.validated_data['username']
@@ -42,17 +76,21 @@ class ConfirmAPIView(APIView):
         try:
             user = User.objects.get(username=username)
             if user.confirm_code.code == code:
-                user.is_active = True  # Активируем клиента
+                user.is_active = True
                 user.save()
-                user.confirm_code.delete()  # Удаляем код после успешного подтверждения
+                user.confirm_code.delete()  # Удаляем код после успешной активации
                 return Response({"message": "Аккаунт успешно подтвержден!"}, status=status.HTTP_200_OK)
             return Response({"error": "Неверный код подтверждения!"}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             return Response({"error": "Пользователь не найден!"}, status=status.HTTP_404_NOT_FOUND)
 
-class LoginAPIView(APIView):
-    def post(self, request):
-        serializer = UserLoginSerializer(data=request.data)
+
+class LoginGenericAPIView(generics.GenericAPIView):
+    serializer_class = UserLoginSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         user = authenticate(
@@ -62,7 +100,7 @@ class LoginAPIView(APIView):
         
         if user is not None:
             if not user.is_active:
-                return Response({"error": "Ваш аккаунт не активирован! Подтвердите его кодом."}, status=status.HTTP_403_FORBIDDEN)
+                return Response({"error": "Ваш аккаунт не активирован! Введите код подтверждения."}, status=status.HTTP_403_FORBIDDEN)
             token, _ = Token.objects.get_or_create(user=user)
             return Response({"token": token.key}, status=status.HTTP_200_OK)
         return Response({"error": "Неверные учетные данные!"}, status=status.HTTP_400_BAD_REQUEST)
